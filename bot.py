@@ -1,14 +1,13 @@
 import asyncio
-import requests
 import hashlib
+import requests
 from bs4 import BeautifulSoup
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
-# ========= CONFIG =========
+# CONFIG
 BOT_TOKEN = "7905376378:AAFc1PRPMp-lvdSFs3dX5uT3k69yf6WiPTs"
 CHAT_ID = "8422059495"
-
 CHECK_INTERVAL = 120  # seconds
 
 SOURCES = {
@@ -32,45 +31,43 @@ PRIORITY_KEYWORDS = [
     "confirmed"
 ]
 
-bot = Bot(token=BOT_TOKEN)
 sent_hashes = set()
 
-# ========= FUNCTIONS =========
+# HELPER FUNCTIONS
 def hash_text(text):
     return hashlib.md5(text.encode()).hexdigest()
 
-def fetch_tweets(source_name, url):
+def fetch_tweets(url):
     try:
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
+        resp = requests.get(url, timeout=15)
+        soup = BeautifulSoup(resp.text, "html.parser")
         tweets = soup.find_all("div", class_="tweet-content")
         return tweets[:7]
     except Exception as e:
-        print(f"Error fetching tweets from {source_name}: {e}")
+        print("Error fetching tweets:", e)
         return []
 
-async def check_news_loop():
-    while True:
-        for source, url in SOURCES.items():
-            tweets = fetch_tweets(source, url)
-            for tweet in tweets:
-                text = tweet.get_text(" ", strip=True).lower()
-                if any(keyword in text for keyword in KEYWORDS):
-                    h = hash_text(text)
-                    if h not in sent_hashes:
-                        priority = any(pk in text for pk in PRIORITY_KEYWORDS)
-                        emoji = "🚨🚨" if priority else "⚽"
-                        title = "PRIORITY ALERT" if priority else "MAN UNITED NEWS"
-                        message = f"{emoji} {title}\n\n📰 Source: {source}\n\n{tweet.get_text(strip=True)}"
-                        try:
-                            await bot.send_message(chat_id=CHAT_ID, text=message)
-                            print(f"Sent alert from {source}")
-                            sent_hashes.add(h)
-                        except Exception as e:
-                            print(f"Error sending message: {e}")
-        await asyncio.sleep(CHECK_INTERVAL)
+async def check_news_job(context: ContextTypes.DEFAULT_TYPE):
+    global sent_hashes
+    for source_name, url in SOURCES.items():
+        tweets = fetch_tweets(url)
+        for tweet in tweets:
+            text = tweet.get_text(" ", strip=True).lower()
+            if any(k in text for k in KEYWORDS):
+                h = hash_text(text)
+                if h not in sent_hashes:
+                    priority = any(pk in text for pk in PRIORITY_KEYWORDS)
+                    emoji = "🚨🚨" if priority else "⚽"
+                    title = "PRIORITY ALERT" if priority else "MAN UNITED NEWS"
+                    message = f"{emoji} {title}\n\n📰 Source: {source_name}\n\n{tweet.get_text(strip=True)}"
+                    try:
+                        await context.bot.send_message(chat_id=CHAT_ID, text=message)
+                        sent_hashes.add(h)
+                        print(f"Sent alert from {source_name}")
+                    except Exception as e:
+                        print("Error sending message:", e)
 
-# ========= COMMANDS =========
+# START COMMAND
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Hello! Welcome to your Man Utd News Bot.\n"
@@ -78,16 +75,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚽ Transfers, manager updates, derby news, and more!"
     )
 
-# ========= MAIN =========
-async def main():
+# MAIN
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
 
-    # Start background news loop
-    app.job_queue.run_repeating(lambda _: asyncio.create_task(check_news_loop()), interval=CHECK_INTERVAL, first=1)
+    # Schedule news check every CHECK_INTERVAL seconds
+    app.job_queue.run_repeating(check_news_job, interval=CHECK_INTERVAL, first=5)
 
     print("✅ Bot is running. Press /start in Telegram to get a welcome message.")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
