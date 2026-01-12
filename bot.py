@@ -250,7 +250,7 @@ async def test_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔴 Welcome to Manchester United Pro News\n\n"
-        "You're subscribed to real-time Man Utd updates for transfers, confirmations, and breaking stories ⚽\n\n"
+        "You're subscribed to real time Man Utd updates for transfers, confirmations, and breaking stories ⚽\n\n"
         "🔔 Professional voice alerts enabled\n\n"
         "Commands:\n"
         "/start  Welcome\n"
