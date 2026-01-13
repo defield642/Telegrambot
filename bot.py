@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import io
+import os
 import requests
 import json
 import pyttsx3
@@ -10,9 +11,9 @@ from types import SimpleNamespace
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# CONFIG
-BOT_TOKEN = "7905376378:AAFc1PRPMp-lvdSFs3dX5uT3k69yf6WiPTs"
-CHAT_ID = "8422059495"
+# CONFIG - use environment variables for sensitive data
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+CHAT_ID = os.environ.get("CHAT_ID", "")
 CHECK_INTERVAL = 120  # seconds
 
 SOURCES = {
@@ -92,8 +93,8 @@ def fetch_tweets(url: str):
 
 async def send_voice_alert(bot, chat_id, text: str):
     """
-    Generate professional male football presenter voice alert.
-    Uses pyttsx3 for deep, authoritative male voice.
+    Generate professional football presenter voice alert using gTTS.
+    Prioritizes gTTS for reliability in cloud environments like Replit/Railway.
     """
     try:
         # Limit text to 300 chars to keep audio short
@@ -103,60 +104,20 @@ async def send_voice_alert(bot, chat_id, text: str):
         # Clean text
         text = text.replace("\n", " ").replace("\r", " ")
         
-        print(f"🎙️  Generating pro presenter voice alert: {text[:50]}...")
+        print(f"🎙️  Generating presenter voice alert: {text[:50]}...")
         
-        # Initialize pyttsx3 engine for professional male voice
-        engine = pyttsx3.init()
-        
-        # Set to male voice
-        voices = engine.getProperty('voices')
-        # Try to set male voice (typically index 0 or 1)
-        for voice in voices:
-            if 'male' in voice.name.lower() or 'david' in voice.name.lower() or voice.gender == 'VT_MALE':
-                engine.setProperty('voice', voice.id)
-                break
-        
-        # Set speaking rate for professional presenter tone (slower, more authoritative)
-        engine.setProperty('rate', 130)  # Slower for dramatic effect
-        
-        # Set volume
-        engine.setProperty('volume', 0.95)
-        
-        # Save to BytesIO buffer
+        # Use gTTS for reliable voice generation without system dependencies
+        tts = gTTS(text=text, lang='en', slow=False)
         bio = io.BytesIO()
-        engine.save_to_file(text, 'temp_alert.mp3')
-        engine.runAndWait()
+        tts.write_to_fp(bio)
+        bio.seek(0)
         
-        # Read the file and send
-        try:
-            with open('temp_alert.mp3', 'rb') as f:
-                audio_data = f.read()
-                bio = io.BytesIO(audio_data)
-            
-            print(f"📤 Sending professional voice alert to {chat_id}...")
-            await bot.send_audio(chat_id=chat_id, audio=bio, filename="presenter_alert.mp3")
-            print("✅ Professional voice alert sent successfully")
-        except Exception as file_err:
-            print(f"Audio file error: {file_err}")
-            # Fallback to gTTS if pyttsx3 fails
-            print("Falling back to gTTS...")
-            tts = gTTS(text=text, lang='en', slow=False)
-            bio = io.BytesIO()
-            tts.write_to_fp(bio)
-            bio.seek(0)
-            await bot.send_audio(chat_id=chat_id, audio=bio, filename="alert.mp3")
+        print(f"📤 Sending voice alert to {chat_id}...")
+        await bot.send_audio(chat_id=chat_id, audio=bio, filename="alert.mp3")
+        print("✅ Voice alert sent successfully")
             
     except Exception as e:
         print(f"❌ Error sending voice alert: {e}")
-        print("Attempting gTTS fallback...")
-        try:
-            tts = gTTS(text=text[:100], lang='en', slow=False)
-            bio = io.BytesIO()
-            tts.write_to_fp(bio)
-            bio.seek(0)
-            await bot.send_audio(chat_id=chat_id, audio=bio, filename="alert.mp3")
-        except Exception as fallback_err:
-            print(f"Fallback also failed: {fallback_err}")
 
 async def test_voice_alert(bot, chat_id):
     """
@@ -236,9 +197,11 @@ async def news_loop(app):
     await asyncio.sleep(5)
     while True:
         try:
+            # Re-fetch the current loop to avoid issues with closed loops
             await check_news_job(SimpleNamespace(bot=app.bot))
         except Exception as e:
             print("Error in news loop:", e)
+        # Sleep for CHECK_INTERVAL (120 seconds) as defined in config
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def test_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -259,6 +222,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # MAIN
 def main():
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN environment variable is not set.")
+        print("Please set the BOT_TOKEN secret in your Replit environment.")
+        return
+    
+    if not CHAT_ID:
+        print("WARNING: CHAT_ID environment variable is not set.")
+        print("The bot will run but automatic news updates won't be sent.")
+    
     # Build bot app
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -271,11 +243,15 @@ def main():
         # Preferred: schedule with Application's task handler
         app.create_task(news_loop(app))
     except Exception:
-        # Fallback: schedule on loop
-        asyncio.get_event_loop().create_task(news_loop(app))
+        # Fallback: schedule on current running loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(news_loop(app))
+        else:
+            asyncio.run(news_loop(app))
 
-    print("✅ Bot is running. Press /start in Telegram to get a welcome message.")
-    print("📢 Commands available: /start, /test_voice")
+    print("Bot is running. Press /start in Telegram to get a welcome message.")
+    print("Commands available: /start, /test_voice")
     app.run_polling()
 
 if __name__ == "__main__":
